@@ -10,16 +10,25 @@ import tensorflow as tf
 import fitz
 import re
 
-class Doc():
+
+class Page:
+
+    def __init__(self, embeds, sntcs, dstIndxs):
+        self.embedings = embeds
+        self.sentences = sntcs
+        self.distance_indx = dstIndxs
+
+
+class Doc:
 
     def __init__(self):
         self.dist_indxs = None
         self.distance_indx = None
         self.page_averages = None
-        self.raw_embedings = None
         self.doc = None
         self.path = None
         self._threshold_intersection = 0.9  # if the intersection is large enough.
+        self.page_data = []
 
     def loadpdf(self, path):
 
@@ -27,9 +36,7 @@ class Doc():
 
         self.doc = fitz.open(path)
 
-
-
-    def highlight_divergent(self, number_of_divergent = 4, shortest_string = 10):
+    def get_embed_data(self, shortest_string=10):
 
         for i, page in enumerate(self.doc):
 
@@ -43,44 +50,85 @@ class Doc():
 
             sentences = text.split(". ")
 
-            sentences = list(filter(lambda i: len(i) > shortest_string, sentences))
+            sentences = list(filter(lambda s: len(s) > shortest_string, sentences))
 
             embeds = self.embedings(sentences)
 
-            if self.raw_embedings is None:
-                self.raw_embedings = np.array(embeds)
-            else:
-                np.vstack((self.raw_embedings, np.array(embeds)))
-
             distance_indx = self.find_distances(embeds)
 
-            for dist, indx in distance_indx[-number_of_divergent:]:
-               ### SEARCH
+            pageData = Page(embeds, sentences, distance_indx)
+            #
+
+            if self.page_data is None:
+
+                self.page_data = [pageData]
+            else:
+                self.page_data.append(pageData)
+
+    def highlight_divergent(self, number_of_divergent=4):
+
+        for page, data in zip(self.doc, self.page_data):
+
+            for dist, indx in data.distance_indx[-number_of_divergent:]:
+
+                ### SEARCH
                 text = "Sample text"
-                text_instances = page.search_for(sentences[indx])
+                text_instances = page.search_for(data.sentences[indx])
 
                 ### HIGHLIGHT
                 for inst in text_instances:
                     highlight = page.add_highlight_annot(inst)
+                    highlight.update()
 
-            highlight.update()
-
-    def save(self, name = "output"):
+    def save(self, name="output"):
         ### OUTPUT
-        self.doc.save( name+".pdf", garbage=4, deflate=True, clean=True)
+        self.doc.save(name + ".pdf", garbage=4, deflate=True, clean=True)
 
-    def link_similar(self):
+    def read_highlights(self, colour=None):
+        if colour is None:
 
-        for i, page in enumerate(self.doc):
-            annot = page.annots()
+            for i, page in enumerate(self.doc):
 
-            while True:
-                try:
-                    this_annot = annot.__next__()
-                    print(self._extract_annot(this_annot, page.get_text()))
-                except StopIteration:
-                    break
+                annot = page.annots()
 
+                # list to store the co-ordinates of all highlights
+                highlights = []
+
+                while True:
+
+                    try:
+                        this_annot = annot.__next__()
+
+
+                        if this_annot.type[0] == 8:
+                            all_coordinates = this_annot.vertices
+
+
+                            if len(all_coordinates) == 4:
+                                highlight_coord = fitz.Quad(all_coordinates).rect
+
+                                highlights.append(highlight_coord)
+                            else:
+                                all_coordinates = [all_coordinates[x:x + 4] for x in range(0, len(all_coordinates), 4)]
+                                for i in range(0, len(all_coordinates)):
+                                    coord = fitz.Quad(all_coordinates[i]).rect
+                                    highlights.append(coord)
+
+                            highlight = page.add_highlight_annot(highlights[-1])
+                            highlight.set_colors(colors='Red')
+                            highlight.update()
+
+                            all_words = page.get_text_words()
+                            # List to store all the highlighted texts
+                            highlight_text = []
+                            for h in highlights:
+                                sentence = [w[4] for w in all_words if fitz.Rect(w[0:4]).intersect(h)]
+                                # print(sentence)
+
+                                highlight_text.append(" ".join(sentence))
+
+                    except StopIteration:
+                        break
 
     def _check_contain(self, r_word, points):
         """If `r_word` is contained in the rectangular area.
@@ -105,6 +153,7 @@ class Doc():
         else:
             contain = False
         return contain
+
     def _extract_annot(self, annot, words_on_page):
         """Extract words in a given highlight.
 
@@ -128,6 +177,7 @@ class Doc():
         sentence = ' '.join(sentences)
         print(sentence)
         return sentence
+
     def find_distances(self, embedings):
 
         average = np.average(embedings, axis=0)
@@ -150,14 +200,12 @@ class Doc():
 
             thisDist = tf.reduce_sum(res)
 
-            this_dist_indx = np.array([(thisDist, i)], dtype=[('dist','<f8'), ('index', '<i4')])
+            this_dist_indx = np.array([(thisDist, i)], dtype=[('dist', '<f8'), ('index', '<i4')])
 
             if i == 0:
                 distance_indx = this_dist_indx
             else:
                 distance_indx = np.append(distance_indx, this_dist_indx, axis=0)
-
-
 
         distance_indx = np.sort(distance_indx, order=['dist'])
 
@@ -166,19 +214,12 @@ class Doc():
         if self.dist_indxs is None:
             self.dist_indxs = distance_indx
         else:
-            self.dist_indxs = np.append( self.dist_indxs, distance_indx)
-
+            self.dist_indxs = np.append(self.dist_indxs, distance_indx)
 
         return distance_indx
 
-    def embedings(self, sentences=None, debuging=False):
+    def embedings(self, sentences, debuging=False):
         model = SentenceTransformer('all-MiniLM-L6-v2')
-
-        if sentences is None:
-            # Our sentences we like to encode
-            sentences = ['This framework generates embeddings for each input sentence',
-                         'Sentences are passed as a list of string.',
-                         'The quick brown fox jumps over the lazy dog.']
 
         # Sentences are encoded by calling model.encode()
         embeddings = model.encode(sentences)
@@ -193,16 +234,20 @@ class Doc():
         return embeddings
 
 
+# materially discursive practice is collaborating with something to find an understanding of it.
+
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
 
+    print("Hello you!")
     test_doc = Doc()
-    print(1)
-    test_doc.loadpdf( "a-matter-of-difference-karen-barad-ontology-and-archaeological-bodies.pdf")
-    print(2)
+    print("Loading Doc")
+    test_doc.loadpdf("a-matter-of-difference-karen-barad-ontology-and-archaeological-bodies.pdf")
+    print("Finding the embedded data")
+    test_doc.get_embed_data()
+    print("Highlighting divergent")
     test_doc.highlight_divergent()
-    print(3)
-    #test_doc.link_similar()
-    print(4)
+    #print("Reading highlighted")
+    #test_doc.read_highlights()
+    print("Saving!")
     test_doc.save()
-
