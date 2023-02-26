@@ -9,7 +9,7 @@ from sentence_transformers import SentenceTransformer, util
 import tensorflow as tf
 import fitz
 import re
-
+import ave
 
 class Page:
 
@@ -29,6 +29,7 @@ class Doc:
         self.path = None
         self._threshold_intersection = 0.9  # if the intersection is large enough.
         self.page_data = []
+        self.AVE = None
 
     def loadpdf(self, path):
 
@@ -36,7 +37,8 @@ class Doc:
 
         self.doc = fitz.open(path)
 
-    def get_embed_data(self, shortest_string=10):
+    def get_embed_data(self, pages = None,  shortest_string=10):
+
 
         for i, page in enumerate(self.doc):
 
@@ -85,46 +87,54 @@ class Doc:
         self.doc.save(name + ".pdf", garbage=4, deflate=True, clean=True)
 
     def read_highlights(self, colour=None):
+
+        # if no colour set
         if colour is None:
-
+            # itterate over pages with enumerator
             for i, page in enumerate(self.doc):
-
+                # get the annotations of that page
                 annot = page.annots()
-
+                print(len(list(annot)), "len")
                 # list to store the co-ordinates of all highlights
                 highlights = []
 
+                # while loop
                 while True:
 
                     try:
+                        # get next annotation
                         this_annot = annot.__next__()
 
-
+                        # if it is a highlighting annot
                         if this_annot.type[0] == 8:
+                            # get coordinates
                             all_coordinates = this_annot.vertices
 
-
+                            # coordinates have 4 verts
                             if len(all_coordinates) == 4:
+                                # get coordinates as a rect
                                 highlight_coord = fitz.Quad(all_coordinates).rect
-
+                                # append them to the list
                                 highlights.append(highlight_coord)
                             else:
+                                # break the coordinates into sets of 4
                                 all_coordinates = [all_coordinates[x:x + 4] for x in range(0, len(all_coordinates), 4)]
+                                # loop over new coordinates
                                 for i in range(0, len(all_coordinates)):
+                                    # get rect coords and add to list
                                     coord = fitz.Quad(all_coordinates[i]).rect
                                     highlights.append(coord)
 
-                            highlight = page.add_highlight_annot(highlights[-1])
+                            #debbugging trying to work out
+                            highlight = page.add_highlight_annot(highlights[0])
                             highlight.set_colors(colors='Red')
                             highlight.update()
 
                             all_words = page.get_text_words()
                             # List to store all the highlighted texts
                             highlight_text = []
-                            for h in highlights:
+                            for h in highlights[0]:
                                 sentence = [w[4] for w in all_words if fitz.Rect(w[0:4]).intersect(h)]
-                                # print(sentence)
-
                                 highlight_text.append(" ".join(sentence))
 
                     except StopIteration:
@@ -233,6 +243,26 @@ class Doc:
 
         return embeddings
 
+    def train_AVE(self):
+
+        self.AVE = ave.AVE();
+
+        dataset = None
+
+        for i, data in enumerate(self.page_data):
+            if i != 0:
+
+                dataset = np.append(dataset, data.embedings, axis=0)
+            else:
+                dataset = data.embedings
+
+        print("Dataset Len: ", dataset.shape[0])
+
+        self.AVE.set_data(dataset)
+        self.AVE.create_model(3)
+        self.AVE.epochs = 10
+        self.AVE.train()
+        self.AVE.test(1)
 
 # materially discursive practice is collaborating with something to find an understanding of it.
 
@@ -247,7 +277,8 @@ if __name__ == '__main__':
     test_doc.get_embed_data()
     print("Highlighting divergent")
     test_doc.highlight_divergent()
-    #print("Reading highlighted")
+    # print("Reading highlighted")
     #test_doc.read_highlights()
+    #test_doc.train_AVE()
     print("Saving!")
-    test_doc.save()
+    test_doc.save("tst")
