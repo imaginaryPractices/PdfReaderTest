@@ -44,15 +44,15 @@ class Doc:
 
             page_txt = page.get_text()
 
-            text = re.sub("https?:\/\/.*[\r\n]*", "", page_txt)
-            text = ''.join(i for i in text if not i.isdigit())
-            text = text.replace("Yvonne Marshall and Benjamin Alberti", "")
-            text = text.replace("A Matter of Difference: Karen Barad, Ontology and Archaeological Bodies", "")
-            text = text.replace("Downloaded from", "")
+            #text = re.sub("https?:\/\/.*[\r\n]*", "", page_txt)
+            #text = ''.join(i for i in text if not i.isdigit())
+            #text = text.replace("Yvonne Marshall and Benjamin Alberti", "")
+            #text = text.replace("A Matter of Difference: Karen Barad, Ontology and Archaeological Bodies", "")
+            #text = text.replace("Downloaded from", "")
 
-            sentences = text.split(". ")
+            sentences = page_txt.split(". ")
 
-            sentences = list(filter(lambda s: len(s) > shortest_string, sentences))
+            #sentences = list(filter(lambda s: len(s) > shortest_string, sentences))
 
             embeds = self.embedings(sentences)
 
@@ -256,13 +256,33 @@ class Doc:
             else:
                 dataset = data.embedings
 
-        print("Dataset Len: ", dataset.shape[0])
-
         self.AVE.set_data(dataset)
         self.AVE.create_model(3)
         self.AVE.epochs = 10
         self.AVE.train()
         self.AVE.test(1)
+
+    def highlight_with_AVE(self):
+
+        for page, data in zip(self.doc, self.page_data):
+
+            for sentence, embed in zip(data.sentences, data.embedings):
+
+                r, g, b = self.AVE.encode_embed_01(embed)
+
+
+                text_instances = page.search_for(sentence)
+
+                if text_instances is None:
+                    continue
+
+                ### HIGHLIGHT
+                for inst in text_instances:
+                    highlight = page.add_highlight_annot(inst)
+                    highlight.set_colors(stroke=[r, g, b])
+                    highlight.update()
+
+
 
 # materially discursive practice is collaborating with something to find an understanding of it.
 
@@ -272,13 +292,14 @@ if __name__ == '__main__':
     print("Hello you!")
     test_doc = Doc()
     print("Loading Doc")
-    test_doc.loadpdf("a-matter-of-difference-karen-barad-ontology-and-archaeological-bodies.pdf")
+    test_doc.loadpdf("xcoax paper.pdf")#a-matter-of-difference-karen-barad-ontology-and-archaeological-bodies.pdf")
     print("Finding the embedded data")
     test_doc.get_embed_data()
     print("Highlighting divergent")
-    test_doc.highlight_divergent()
+    #test_doc.highlight_divergent()
     # print("Reading highlighted")
     #test_doc.read_highlights()
-    #test_doc.train_AVE()
+    test_doc.train_AVE()
+    test_doc.highlight_with_AVE()
     print("Saving!")
     test_doc.save("tst")

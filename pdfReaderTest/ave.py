@@ -51,6 +51,17 @@ class AVE:
         logqz_x = self.log_normal_pdf(z, mean, logvar)
         return -tf.reduce_mean(logpx_z + logpz - logqz_x)
 
+    def encode_embed_01(self, embed):
+
+        embed = tf.constant(embed, shape=(1,self.input_dim[0]), dtype=tf.float32)
+        mean, logvar = self.model.encode(embed)
+        rgb = self.model.reparameterize(mean, logvar)[0]
+        rgb = tf.linalg.normalize(rgb)[0]
+        rgb += 1
+        rgb *= 0.4
+        rgb += 0.2
+        return rgb[0], rgb[1], rgb[2]
+
     @tf.function
     def train_step(self, model, x, optimizer):
         """Executes one training step and returns the loss.
@@ -70,9 +81,7 @@ class AVE:
         self.random_vector_for_generation = tf.random.normal(
             shape=[100, self.latent_dim])
         self.model = self.NN(self.input_dim, self.latent_dim)
-        print(self.model.encoder.summary())
-        #self.model.build( input_shape= self.input_dim, output_shape=self.input_dim)
-        #self.model.summary()
+
     def train(self):
 
         for epoch in range(1, self.epochs + 1):
@@ -85,19 +94,21 @@ class AVE:
             for test_x in self.test_dataset:
                 loss(self.compute_loss(self.model, test_x))
             elbo = -loss.result()
-            #print('Epoch: {}, Test set ELBO: {}, time elapse for current epoch: {}'
-                  #.format(epoch, elbo, end_time - start_time))
+            print('Epoch: {}, Test set ELBO: {}, time elapse for current epoch: {}'
+                  .format(epoch, elbo, end_time - start_time))
 
     def test(self, number=10):
 
-        print(self.model.encoder.summary())
+        print("TEST!")
 
         for i, test in enumerate(self.test_dataset):
 
             if i > number:
                 return;
-            mean, logvar = self.model.encode(test)
-            print(mean.shape, logvar.shape)
+
+            loss = self.compute_loss(self.model, test)
+
+            print(loss)
 
     class NN(tf.keras.Model):
         """variational autoencoder."""
@@ -111,7 +122,6 @@ class AVE:
                     tf.keras.layers.Dense(512, activation=tf.nn.relu),
                     tf.keras.layers.Dense(256, activation=tf.nn.relu),
                     tf.keras.layers.Dense(128, activation=tf.nn.relu),
-                    tf.keras.layers.Flatten(),
                     # No activation
                     tf.keras.layers.Dense(latent_dim + latent_dim),
                 ]
@@ -121,7 +131,7 @@ class AVE:
                 [
                     tf.keras.layers.InputLayer(input_shape=(latent_dim,)),
                     tf.keras.layers.Dense(units=128, activation=tf.nn.relu),
-                    tf.keras.layers.Dense(256),
+                    tf.keras.layers.Dense(256, activation=tf.nn.relu),
                     tf.keras.layers.Dense(input_dim[0]),
                     tf.keras.layers.Reshape(target_shape=input_dim),
 
@@ -135,7 +145,9 @@ class AVE:
             return self.decode(eps, apply_sigmoid=True)
 
         def encode(self, x):
-            mean, logvar = tf.split(self.encoder(x), num_or_size_splits=2, axis=1)
+            encoding = self.encoder(x)
+            #print(encoding)
+            mean, logvar = tf.split(encoding , num_or_size_splits=2, axis=1)
             return mean, logvar
 
         def reparameterize(self, mean, logvar):
